@@ -104,3 +104,49 @@ def eliminar_estudiante_por_id(estudiante_id: int, session: Session = Depends(ge
     if eliminar_estudiante(session, estudiante_id):
         return {"message": "Estudiante eliminado correctamente"}
     raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+# CURSOS
+
+@app.post("/cursos/", response_model=Curso, tags=["Cursos"])
+def crear_nuevo_curso(obj: Curso, session: Session = Depends(get_session)):
+    return crear_curso(session, obj)
+
+@app.get("/cursos/", response_model=List[Curso], tags=["Cursos"])
+def listar_todos_los_cursos(
+    skip: int = 0,
+    limit: int = Query(10, le=100),
+    include_deleted: bool = Query(False, description="Incluir eliminados lógicamente"),
+    creditos: Optional[int] = None,
+    codigo: Optional[str] = None,
+    nombre: Optional[str] = None,
+    session: Session = Depends(get_session)
+):
+    return listar_cursos(session, skip, limit, include_deleted, creditos, codigo, nombre)
+
+@app.get("/cursos/deleted", response_model=List[Curso], tags=["Cursos"])
+def listar_cursos_borrados(session: Session = Depends(get_session)):
+    return listar_cursos_eliminados(session)
+
+@app.post("/cursos/{curso_id}/restore", tags=["Cursos"])
+def restaurar_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
+    if restaurar_curso(session, curso_id):
+        return {"message": "Curso restaurado correctamente"}
+    raise HTTPException(status_code=404, detail="No fue posible restaurar el curso")
+
+@app.get("/cursos/search/", response_model=List[Curso], tags=["Cursos"])
+def buscar_curso(nombre: str = Query(..., min_length=1), session: Session = Depends(get_session)):
+    return buscar_curso_por_nombre(session, nombre)
+
+@app.get("/cursos/{curso_id}", response_model=Curso, tags=["Cursos"])
+def obtener_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
+    return obtener_curso(session, curso_id)
+
+@app.put("/cursos/{curso_id}", response_model=Curso, tags=["Cursos"])
+def actualizar_datos_curso(curso_id: int, obj: Curso, session: Session = Depends(get_session)):
+    return actualizar_curso(session, curso_id, obj)
+
+@app.delete("/cursos/{curso_id}", tags=["Cursos"])
+def eliminar_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
+    if eliminar_curso(session, curso_id):
+        return {"message": "Curso eliminado correctamente"}
+    raise HTTPException(status_code=404, detail="Curso no encontrado")
