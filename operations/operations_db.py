@@ -7,38 +7,37 @@ from data.models import (
     Estudiante,
     Curso,
     Matricula,
-    
 )
 
 # HELPERS
 
 def _apply_active_filter(model, include_deleted: bool = False):
-    """Condición para incluir/excluir eliminados lógicamente."""
     if include_deleted:
         return True
     return model.is_deleted == False  # noqa: E712
 
 def _handle_exception(session: Session, exc: Exception, message: str):
-    """Rollback y excepción HTTP unificada."""
     session.rollback()
     raise HTTPException(status_code=500, detail=f"{message}. Error: {str(exc)}")
 
 def _created_payload(obj) -> Dict[str, Any]:
-    """
-    Respuesta para CREATE: - oculta 'id' y 'is_deleted' (aunque is_deleted ya está oculto por el modelo)
-    """
     return obj.dict(exclude={"id", "is_deleted"})
 
 
 # ESTUDIANTES (CREAR + BUSQUEDA + HISTORIAL)
 
-def crear_estudiante(session: Session, obj: Estudiante) -> Dict[str, Any]:
+def crear_estudiante(session: Session, obj) -> Dict[str, Any]:
     try:
-        obj.id = None
-        session.add(obj)
+        obj_db = Estudiante(**obj.dict()) if hasattr(obj, "dict") else obj
+        obj_db.id = None
+        session.add(obj_db)
         session.commit()
-        session.refresh(obj)
-        return _created_payload(obj)
+        session.refresh(obj_db)
+        return obj_db
+    except IntegrityError:
+        session.rollback()
+        # 409: violación de unicidad
+        raise HTTPException(status_code=409, detail="No pueden existir dos estudiantes con la misma cédula")
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al crear el estudiante")
 
@@ -65,7 +64,7 @@ def obtener_estudiante(session: Session, estudiante_id: int) -> Estudiante:
     try:
         obj = session.get(Estudiante, estudiante_id)
         if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Estudiante no encontrado o eliminado")
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado o fue eliminado")
         return obj
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al obtener estudiante")
@@ -78,18 +77,18 @@ def buscar_estudiante_por_nombre(session: Session, nombre: str) -> List[Estudian
         )
         resultados = session.exec(q).all()
         if not resultados:
-            raise HTTPException(status_code=404, detail=f"No se encontraron estudiantes con '{nombre}'")
+            raise HTTPException(status_code=404, detail=f"No se encontraron estudiantes con nombre que contenga '{nombre}'")
         return resultados
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al buscar estudiantes por nombre")
 
-def actualizar_estudiante(session: Session, estudiante_id: int, obj_update: Estudiante) -> Estudiante:
+def actualizar_estudiante(session: Session, estudiante_id: int, obj_update) -> Estudiante:
     try:
         obj = session.get(Estudiante, estudiante_id)
         if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Estudiante no encontrado o eliminado")
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado o fue eliminado")
 
-        data = obj_update.dict(exclude_unset=True)
+        data = obj_update.dict(exclude_unset=True) if hasattr(obj_update, "dict") else {}
         data.pop("id", None)
         data.pop("is_deleted", None)
 
@@ -99,6 +98,9 @@ def actualizar_estudiante(session: Session, estudiante_id: int, obj_update: Estu
         session.commit()
         session.refresh(obj)
         return obj
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="No pueden existir dos estudiantes con la misma cédula")
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al actualizar estudiante")
 
@@ -132,21 +134,25 @@ def restaurar_estudiante(session: Session, estudiante_id: int) -> bool:
 
 def listar_estudiantes_eliminados(session: Session) -> List[Estudiante]:
     try:
-        q = select(Estudiante).where(Estudiante.is_deleted == True)  # noqa: E712
+        q = select(Estudiante).where(Estudiante.is_deleted == True)
         return session.exec(q).all()
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al listar estudiantes eliminados")
 
 
-# CURSOS (CREAR + BUSQUEDA + HISTORIAL)
+# CURSOS
 
-def crear_curso(session: Session, obj: Curso) -> Dict[str, Any]:
+def crear_curso(session: Session, obj) -> Dict[str, Any]:
     try:
-        obj.id = None
-        session.add(obj)
+        obj_db = Curso(**obj.dict()) if hasattr(obj, "dict") else obj
+        obj_db.id = None
+        session.add(obj_db)
         session.commit()
-        session.refresh(obj)
-        return _created_payload(obj)
+        session.refresh(obj_db)
+        return _created_payload(obj_db)
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="No pueden existir dos cursos con el mismo código")
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al crear el curso")
 
@@ -176,7 +182,7 @@ def obtener_curso(session: Session, curso_id: int) -> Curso:
     try:
         obj = session.get(Curso, curso_id)
         if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Curso no encontrado o eliminado")
+            raise HTTPException(status_code=404, detail="Curso no encontrado o fue eliminado")
         return obj
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al obtener curso")
@@ -189,18 +195,18 @@ def buscar_curso_por_nombre(session: Session, nombre: str) -> List[Curso]:
         )
         resultados = session.exec(q).all()
         if not resultados:
-            raise HTTPException(status_code=404, detail=f"No se encontraron cursos con '{nombre}'")
+            raise HTTPException(status_code=404, detail=f"No se encontraron cursos con nombre que contenga '{nombre}'")
         return resultados
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al buscar cursos por nombre")
 
-def actualizar_curso(session: Session, curso_id: int, obj_update: Curso) -> Curso:
+def actualizar_curso(session: Session, curso_id: int, obj_update) -> Curso:
     try:
         obj = session.get(Curso, curso_id)
         if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Curso no encontrado o eliminado")
+            raise HTTPException(status_code=404, detail="Curso no encontrado o fue eliminado")
 
-        data = obj_update.dict(exclude_unset=True)
+        data = obj_update.dict(exclude_unset=True) if hasattr(obj_update, "dict") else {}
         data.pop("id", None)
         data.pop("is_deleted", None)
 
@@ -210,6 +216,9 @@ def actualizar_curso(session: Session, curso_id: int, obj_update: Curso) -> Curs
         session.commit()
         session.refresh(obj)
         return obj
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="No pueden existir dos cursos con el mismo código")
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al actualizar curso")
 
@@ -248,13 +257,10 @@ def listar_cursos_eliminados(session: Session) -> List[Curso]:
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al listar cursos eliminados")
 
-# MATRÍCULAS (N:M) — Matriculado/No matriculado y consultas
+
+# MATRÍCULAS (N:M)
 
 def matricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[str, Any]:
-    """
-    Crea una matrícula (Estudiante-Curso).
-    Evita duplicados; si sucede, retornamos 409.
-     """
     try:
         est = session.get(Estudiante, estudiante_id)
         cur = session.get(Curso, curso_id)
@@ -266,13 +272,12 @@ def matricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[str,
         m = Matricula(estudiante_id=estudiante_id, curso_id=curso_id)
         session.add(m)
         session.commit()
-
         return {"message": "Matrícula creada", "estudiante_id": estudiante_id, "curso_id": curso_id}
     except IntegrityError:
         session.rollback()
-        raise HTTPException(status_code=409, detail="Estudiante ya esta matriculado en ese curso")
+        raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en ese curso")
     except SQLAlchemyError as e:
-      _handle_exception(session, e, "Error al crear matricula")
+        _handle_exception(session, e, "Error al crear matrícula")
 
 def desmatricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[str, Any]:
     try:
@@ -289,12 +294,8 @@ def desmatricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[s
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al desmatricular")
 
-def cursos_de_estudiante(
-    session: Session,
-    estudiante_id: int,
-) -> List[Curso]:
+def cursos_de_estudiante(session: Session, estudiante_id: int) -> List[Curso]:
     try:
-        # Valida estudiante
         est = session.get(Estudiante, estudiante_id)
         if not est or est.is_deleted:
             raise HTTPException(status_code=404, detail="Estudiante no encontrado")
@@ -302,18 +303,14 @@ def cursos_de_estudiante(
         q = (
             select(Curso)
             .join(Matricula, (Matricula.curso_id == Curso.id))
-            .where(Curso.is_deleted == False, Matricula.estudiante_id == estudiante_id)  # noqa: E712
+            .where(Curso.is_deleted == False, Matricula.estudiante_id == estudiante_id)
         )
         return session.exec(q).all()
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al consultar cursos del estudiante")
 
-def estudiantes_de_curso(
-    session: Session,
-    curso_id: int,
-) -> List[Estudiante]:
+def estudiantes_de_curso(session: Session, curso_id: int) -> List[Estudiante]:
     try:
-        # Valida curso
         cur = session.get(Curso, curso_id)
         if not cur or cur.is_deleted:
             raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -321,7 +318,7 @@ def estudiantes_de_curso(
         q = (
             select(Estudiante)
             .join(Matricula, (Matricula.estudiante_id == Estudiante.id))
-            .where(Estudiante.is_deleted == False, Matricula.curso_id == curso_id)  # noqa: E712
+            .where(Estudiante.is_deleted == False, Matricula.curso_id == curso_id)
         )
         return session.exec(q).all()
     except SQLAlchemyError as e:
