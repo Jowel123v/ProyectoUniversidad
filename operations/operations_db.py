@@ -150,3 +150,102 @@ def crear_curso(session: Session, obj: Curso) -> Dict[str, Any]:
         return _created_payload(obj)
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al crear el curso")
+
+def listar_cursos(
+    session: Session,
+    skip: int = 0,
+    limit: int = 10,
+    include_deleted: bool = False,
+    creditos: Optional[int] = None,
+    codigo: Optional[str] = None,
+    nombre: Optional[str] = None,
+) -> List[Curso]:
+    try:
+        q = select(Curso).where(_apply_active_filter(Curso, include_deleted))
+        if creditos is not None:
+            q = q.where(Curso.creditos == creditos)
+        if codigo:
+            q = q.where(Curso.codigo.ilike(f"%{codigo}%"))
+        if nombre:
+            q = q.where(Curso.nombre.ilike(f"%{nombre}%"))
+        q = q.offset(skip).limit(limit)
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al listar cursos")
+
+def obtener_curso(session: Session, curso_id: int) -> Curso:
+    try:
+        obj = session.get(Curso, curso_id)
+        if not obj or obj.is_deleted:
+            raise HTTPException(status_code=404, detail="Curso no encontrado o eliminado")
+        return obj
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al obtener curso")
+
+def buscar_curso_por_nombre(session: Session, nombre: str) -> List[Curso]:
+    try:
+        q = select(Curso).where(
+            Curso.nombre.ilike(f"%{nombre}%"),
+            Curso.is_deleted == False,  # noqa: E712
+        )
+        resultados = session.exec(q).all()
+        if not resultados:
+            raise HTTPException(status_code=404, detail=f"No se encontraron cursos con '{nombre}'")
+        return resultados
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al buscar cursos por nombre")
+
+def actualizar_curso(session: Session, curso_id: int, obj_update: Curso) -> Curso:
+    try:
+        obj = session.get(Curso, curso_id)
+        if not obj or obj.is_deleted:
+            raise HTTPException(status_code=404, detail="Curso no encontrado o eliminado")
+
+        data = obj_update.dict(exclude_unset=True)
+        data.pop("id", None)
+        data.pop("is_deleted", None)
+
+        for k, v in data.items():
+            setattr(obj, k, v)
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+        return obj
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al actualizar curso")
+
+def eliminar_curso(session: Session, curso_id: int) -> bool:
+    try:
+        obj = session.get(Curso, curso_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Curso no encontrado")
+        if obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El curso ya estaba eliminado")
+        obj.is_deleted = True
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al eliminar curso")
+
+def restaurar_curso(session: Session, curso_id: int) -> bool:
+    try:
+        obj = session.get(Curso, curso_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Curso no encontrado")
+        if not obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El curso no está eliminado")
+        obj.is_deleted = False
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al restaurar el curso")
+
+def listar_cursos_eliminados(session: Session) -> List[Curso]:
+    try:
+        q = select(Curso).where(Curso.is_deleted == True)  # noqa: E712
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al listar cursos eliminados")
+
