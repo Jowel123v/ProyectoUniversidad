@@ -139,7 +139,7 @@ def listar_estudiantes_eliminados(session: Session) -> List[Estudiante]:
         _handle_exception(session, e, "Error al listar estudiantes eliminados")
 
 
-# CURSOS (CREAR)
+# CURSOS (CREAR + BUSQUEDA + HISTORIAL)
 
 def crear_curso(session: Session, obj: Curso) -> Dict[str, Any]:
     try:
@@ -248,4 +248,117 @@ def listar_cursos_eliminados(session: Session) -> List[Curso]:
         return session.exec(q).all()
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al listar cursos eliminados")
+
+# PERIODOS (CRUD + ACTIVO/NO ACTIVO)
+
+def crear_periodo(session: Session, obj: Periodo) -> Dict[str, Any]:
+    try:
+        obj.id = None
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+        return _created_payload(obj)
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al crear periodo")
+
+def listar_periodos(
+    session: Session,
+    skip: int = 0,
+    limit: int = 50,
+    include_deleted: bool = False,
+    anio: Optional[int] = None,
+    numero: Optional[int] = None,
+    activo: Optional[bool] = None,
+) -> List[Periodo]:
+    try:
+        q = select(Periodo).where(_apply_active_filter(Periodo, include_deleted))
+        if anio is not None:
+            q = q.where(Periodo.anio == anio)
+        if numero is not None:
+            q = q.where(Periodo.numero == numero)
+        if activo is not None:
+            q = q.where(Periodo.activo == activo)
+        q = q.offset(skip).limit(limit)
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al listar periodos")
+
+def obtener_periodo(session: Session, periodo_id: int) -> Periodo:
+    try:
+        obj = session.get(Periodo, periodo_id)
+        if not obj or obj.is_deleted:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
+        return obj
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al obtener periodo")
+
+def actualizar_periodo(session: Session, periodo_id: int, obj_update: Periodo) -> Periodo:
+    try:
+        obj = session.get(Periodo, periodo_id)
+        if not obj or obj.is_deleted:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
+
+        data = obj_update.dict(exclude_unset=True)
+        data.pop("id", None)
+        data.pop("is_deleted", None)
+
+        for k, v in data.items():
+            setattr(obj, k, v)
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+        return obj
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al actualizar periodo")
+
+def eliminar_periodo(session: Session, periodo_id: int) -> bool:
+    try:
+        obj = session.get(Periodo, periodo_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado")
+        if obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El periodo ya estaba eliminado")
+        obj.is_deleted = True
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al eliminar periodo")
+
+def restaurar_periodo(session: Session, periodo_id: int) -> bool:
+    try:
+        obj = session.get(Periodo, periodo_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado")
+        if not obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El periodo no está eliminado")
+        obj.is_deleted = False
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al restaurar periodo")
+
+def activar_periodo(session: Session, periodo_id: int) -> Dict[str, Any]:
+
+    #Marca un periodo como activo y (opcional) desactiva los demás.
+
+    try:
+        # Desactivar todos
+        q = select(Periodo).where(Periodo.is_deleted == False)  # noqa: E712
+        for p in session.exec(q).all():
+            p.activo = False
+            session.add(p)
+
+        # Activar el solicitado
+        obj = session.get(Periodo, periodo_id)
+        if not obj or obj.is_deleted:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
+        obj.activo = True
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+        return {"message": "Periodo activado", "periodo_id": obj.id}
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al activar el periodo")
 
