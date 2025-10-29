@@ -1,6 +1,7 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 
+
 class TableBase(SQLModel):
     id: Optional[int] = Field(default=None, primary_key=True, sa_column_kwargs={"autoincrement": True})
     is_deleted: bool = Field(default=False, exclude=True)
