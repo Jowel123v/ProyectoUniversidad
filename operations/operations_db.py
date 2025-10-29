@@ -1,13 +1,13 @@
 from typing import List, Optional, Dict, Any
 from sqlmodel import Session, select
 from fastapi import HTTPException
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from data.models import (
     Estudiante,
     Curso,
     Matricula,
-    Periodo,
+    
 )
 
 # HELPERS
@@ -25,8 +25,7 @@ def _handle_exception(session: Session, exc: Exception, message: str):
 
 def _created_payload(obj) -> Dict[str, Any]:
     """
-    Respuesta para CREATE:
-    - oculta 'id' y 'is_deleted' (aunque is_deleted ya está oculto por el modelo)
+    Respuesta para CREATE: - oculta 'id' y 'is_deleted' (aunque is_deleted ya está oculto por el modelo)
     """
     return obj.dict(exclude={"id", "is_deleted"})
 
@@ -249,149 +248,37 @@ def listar_cursos_eliminados(session: Session) -> List[Curso]:
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al listar cursos eliminados")
 
-# PERIODOS (CRUD + ACTIVO/NO ACTIVO)
-
-def crear_periodo(session: Session, obj: Periodo) -> Dict[str, Any]:
-    try:
-        obj.id = None
-        session.add(obj)
-        session.commit()
-        session.refresh(obj)
-        return _created_payload(obj)
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al crear periodo")
-
-def listar_periodos(
-    session: Session,
-    skip: int = 0,
-    limit: int = 50,
-    include_deleted: bool = False,
-    anio: Optional[int] = None,
-    numero: Optional[int] = None,
-    activo: Optional[bool] = None,
-) -> List[Periodo]:
-    try:
-        q = select(Periodo).where(_apply_active_filter(Periodo, include_deleted))
-        if anio is not None:
-            q = q.where(Periodo.anio == anio)
-        if numero is not None:
-            q = q.where(Periodo.numero == numero)
-        if activo is not None:
-            q = q.where(Periodo.activo == activo)
-        q = q.offset(skip).limit(limit)
-        return session.exec(q).all()
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al listar periodos")
-
-def obtener_periodo(session: Session, periodo_id: int) -> Periodo:
-    try:
-        obj = session.get(Periodo, periodo_id)
-        if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
-        return obj
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al obtener periodo")
-
-def actualizar_periodo(session: Session, periodo_id: int, obj_update: Periodo) -> Periodo:
-    try:
-        obj = session.get(Periodo, periodo_id)
-        if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
-
-        data = obj_update.dict(exclude_unset=True)
-        data.pop("id", None)
-        data.pop("is_deleted", None)
-
-        for k, v in data.items():
-            setattr(obj, k, v)
-        session.add(obj)
-        session.commit()
-        session.refresh(obj)
-        return obj
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al actualizar periodo")
-
-def eliminar_periodo(session: Session, periodo_id: int) -> bool:
-    try:
-        obj = session.get(Periodo, periodo_id)
-        if not obj:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado")
-        if obj.is_deleted:
-            raise HTTPException(status_code=400, detail="El periodo ya estaba eliminado")
-        obj.is_deleted = True
-        session.add(obj)
-        session.commit()
-        return True
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al eliminar periodo")
-
-def restaurar_periodo(session: Session, periodo_id: int) -> bool:
-    try:
-        obj = session.get(Periodo, periodo_id)
-        if not obj:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado")
-        if not obj.is_deleted:
-            raise HTTPException(status_code=400, detail="El periodo no está eliminado")
-        obj.is_deleted = False
-        session.add(obj)
-        session.commit()
-        return True
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al restaurar periodo")
-
-def activar_periodo(session: Session, periodo_id: int) -> Dict[str, Any]:
-
-    #Marca un periodo como activo y (opcional) desactiva los demás.
-
-    try:
-        # Desactivar todos
-        q = select(Periodo).where(Periodo.is_deleted == False)  # noqa: E712
-        for p in session.exec(q).all():
-            p.activo = False
-            session.add(p)
-
-        # Activar el solicitado
-        obj = session.get(Periodo, periodo_id)
-        if not obj or obj.is_deleted:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado o eliminado")
-        obj.activo = True
-        session.add(obj)
-        session.commit()
-        session.refresh(obj)
-        return {"message": "Periodo activado", "periodo_id": obj.id}
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al activar el periodo")
-
 # MATRÍCULAS (N:M) — Matriculado/No matriculado y consultas
 
-def matricular(session: Session, estudiante_id: int, curso_id: int, periodo_id: int) -> Dict[str, Any]:
-
+def matricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[str, Any]:
+    """
+    Crea una matrícula (Estudiante-Curso).
+    Evita duplicados; si sucede, retornamos 409.
+     """
     try:
         est = session.get(Estudiante, estudiante_id)
         cur = session.get(Curso, curso_id)
-        per = session.get(Periodo, periodo_id)
         if not est or est.is_deleted:
             raise HTTPException(status_code=404, detail="Estudiante no encontrado")
         if not cur or cur.is_deleted:
             raise HTTPException(status_code=404, detail="Curso no encontrado")
-        if not per or per.is_deleted:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado")
 
-        m = Matricula(estudiante_id=estudiante_id, curso_id=curso_id, periodo_id=periodo_id)
+        m = Matricula(estudiante_id=estudiante_id, curso_id=curso_id)
         session.add(m)
         session.commit()
-        return {"message": "Matrícula creada", "estudiante_id": estudiante_id, "curso_id": curso_id, "periodo_id": periodo_id}
-    except SQLAlchemyError:
-        session.rollback()
-        # Duplicado por PK compuesta
-        raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en ese curso para ese periodo")
 
-def desmatricular(session: Session, estudiante_id: int, curso_id: int, periodo_id: int) -> Dict[str, Any]:
+        return {"message": "Matrícula creada", "estudiante_id": estudiante_id, "curso_id": curso_id}
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Estudiante ya esta matriculado en ese curso")
+    except SQLAlchemyError as e:
+      _handle_exception(session, e, "Error al crear matricula")
+
+def desmatricular(session: Session, estudiante_id: int, curso_id: int) -> Dict[str, Any]:
     try:
         q = select(Matricula).where(
             Matricula.estudiante_id == estudiante_id,
             Matricula.curso_id == curso_id,
-            Matricula.periodo_id == periodo_id,
         )
         m = session.exec(q).first()
         if not m:
@@ -405,7 +292,6 @@ def desmatricular(session: Session, estudiante_id: int, curso_id: int, periodo_i
 def cursos_de_estudiante(
     session: Session,
     estudiante_id: int,
-    periodo_id: Optional[int] = None
 ) -> List[Curso]:
     try:
         # Valida estudiante
@@ -418,8 +304,6 @@ def cursos_de_estudiante(
             .join(Matricula, (Matricula.curso_id == Curso.id))
             .where(Curso.is_deleted == False, Matricula.estudiante_id == estudiante_id)  # noqa: E712
         )
-        if periodo_id is not None:
-            q = q.where(Matricula.periodo_id == periodo_id)
         return session.exec(q).all()
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al consultar cursos del estudiante")
@@ -427,7 +311,6 @@ def cursos_de_estudiante(
 def estudiantes_de_curso(
     session: Session,
     curso_id: int,
-    periodo_id: Optional[int] = None
 ) -> List[Estudiante]:
     try:
         # Valida curso
@@ -440,21 +323,6 @@ def estudiantes_de_curso(
             .join(Matricula, (Matricula.estudiante_id == Estudiante.id))
             .where(Estudiante.is_deleted == False, Matricula.curso_id == curso_id)  # noqa: E712
         )
-        if periodo_id is not None:
-            q = q.where(Matricula.periodo_id == periodo_id)
         return session.exec(q).all()
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al consultar estudiantes del curso")
-
-def matriculas_por_periodo(
-    session: Session,
-    periodo_id: int
-) -> List[Matricula]:
-    try:
-        per = session.get(Periodo, periodo_id)
-        if not per or per.is_deleted:
-            raise HTTPException(status_code=404, detail="Periodo no encontrado")
-        q = select(Matricula).where(Matricula.periodo_id == periodo_id)
-        return session.exec(q).all()
-    except SQLAlchemyError as e:
-        _handle_exception(session, e, "Error al listar matrículas por periodo")
