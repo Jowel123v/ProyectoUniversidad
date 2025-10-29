@@ -102,3 +102,31 @@ def actualizar_estudiante(session: Session, estudiante_id: int, obj_update: Estu
         return obj
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al actualizar estudiante")
+
+def eliminar_estudiante(session: Session, estudiante_id: int) -> bool:
+    try:
+        obj = session.get(Estudiante, estudiante_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+        if obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El estudiante ya estaba eliminado")
+        obj.is_deleted = True
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al eliminar estudiante")
+
+def restaurar_estudiante(session: Session, estudiante_id: int) -> bool:
+    try:
+        obj = session.get(Estudiante, estudiante_id)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+        if not obj.is_deleted:
+            raise HTTPException(status_code=400, detail="El estudiante no está eliminado")
+        obj.is_deleted = False
+        session.add(obj)
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al restaurar el estudiante")
