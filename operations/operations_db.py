@@ -362,3 +362,99 @@ def activar_periodo(session: Session, periodo_id: int) -> Dict[str, Any]:
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al activar el periodo")
 
+# MATRÍCULAS (N:M) — Matriculado/No matriculado y consultas
+
+def matricular(session: Session, estudiante_id: int, curso_id: int, periodo_id: int) -> Dict[str, Any]:
+
+    try:
+        est = session.get(Estudiante, estudiante_id)
+        cur = session.get(Curso, curso_id)
+        per = session.get(Periodo, periodo_id)
+        if not est or est.is_deleted:
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+        if not cur or cur.is_deleted:
+            raise HTTPException(status_code=404, detail="Curso no encontrado")
+        if not per or per.is_deleted:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado")
+
+        m = Matricula(estudiante_id=estudiante_id, curso_id=curso_id, periodo_id=periodo_id)
+        session.add(m)
+        session.commit()
+        return {"message": "Matrícula creada", "estudiante_id": estudiante_id, "curso_id": curso_id, "periodo_id": periodo_id}
+    except SQLAlchemyError:
+        session.rollback()
+        # Duplicado por PK compuesta
+        raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en ese curso para ese periodo")
+
+def desmatricular(session: Session, estudiante_id: int, curso_id: int, periodo_id: int) -> Dict[str, Any]:
+    try:
+        q = select(Matricula).where(
+            Matricula.estudiante_id == estudiante_id,
+            Matricula.curso_id == curso_id,
+            Matricula.periodo_id == periodo_id,
+        )
+        m = session.exec(q).first()
+        if not m:
+            raise HTTPException(status_code=404, detail="Matrícula no encontrada")
+        session.delete(m)
+        session.commit()
+        return {"message": "Matrícula eliminada"}
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al desmatricular")
+
+def cursos_de_estudiante(
+    session: Session,
+    estudiante_id: int,
+    periodo_id: Optional[int] = None
+) -> List[Curso]:
+    try:
+        # Valida estudiante
+        est = session.get(Estudiante, estudiante_id)
+        if not est or est.is_deleted:
+            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+        q = (
+            select(Curso)
+            .join(Matricula, (Matricula.curso_id == Curso.id))
+            .where(Curso.is_deleted == False, Matricula.estudiante_id == estudiante_id)  # noqa: E712
+        )
+        if periodo_id is not None:
+            q = q.where(Matricula.periodo_id == periodo_id)
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al consultar cursos del estudiante")
+
+def estudiantes_de_curso(
+    session: Session,
+    curso_id: int,
+    periodo_id: Optional[int] = None
+) -> List[Estudiante]:
+    try:
+        # Valida curso
+        cur = session.get(Curso, curso_id)
+        if not cur or cur.is_deleted:
+            raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+        q = (
+            select(Estudiante)
+            .join(Matricula, (Matricula.estudiante_id == Estudiante.id))
+            .where(Estudiante.is_deleted == False, Matricula.curso_id == curso_id)  # noqa: E712
+        )
+        if periodo_id is not None:
+            q = q.where(Matricula.periodo_id == periodo_id)
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al consultar estudiantes del curso")
+
+def matriculas_por_periodo(
+    session: Session,
+    periodo_id: int
+) -> List[Matricula]:
+    try:
+        per = session.get(Periodo, periodo_id)
+        if not per or per.is_deleted:
+            raise HTTPException(status_code=404, detail="Periodo no encontrado")
+        q = select(Matricula).where(Matricula.periodo_id == periodo_id)
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al listar matrículas por periodo")
