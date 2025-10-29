@@ -31,7 +31,7 @@ def _created_payload(obj) -> Dict[str, Any]:
     return obj.dict(exclude={"id", "is_deleted"})
 
 
-# ESTUDIANTES (CREAR + BUSQUEDA)
+# ESTUDIANTES (CREAR + BUSQUEDA + HISTORIAL)
 
 def crear_estudiante(session: Session, obj: Estudiante) -> Dict[str, Any]:
     try:
@@ -130,3 +130,23 @@ def restaurar_estudiante(session: Session, estudiante_id: int) -> bool:
         return True
     except SQLAlchemyError as e:
         _handle_exception(session, e, "Error al restaurar el estudiante")
+
+def listar_estudiantes_eliminados(session: Session) -> List[Estudiante]:
+    try:
+        q = select(Estudiante).where(Estudiante.is_deleted == True)  # noqa: E712
+        return session.exec(q).all()
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al listar estudiantes eliminados")
+
+
+# CURSOS (CREAR)
+
+def crear_curso(session: Session, obj: Curso) -> Dict[str, Any]:
+    try:
+        obj.id = None
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+        return _created_payload(obj)
+    except SQLAlchemyError as e:
+        _handle_exception(session, e, "Error al crear el curso")
