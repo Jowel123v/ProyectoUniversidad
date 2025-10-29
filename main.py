@@ -150,3 +150,21 @@ def eliminar_curso_por_id(curso_id: int, session: Session = Depends(get_session)
     if eliminar_curso(session, curso_id):
         return {"message": "Curso eliminado correctamente"}
     raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+# MATRÍCULAS (N:M)
+
+@app.post("/matriculas/", tags=["Matrículas"])
+def crear_matricula(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
+    return matricular(session, estudiante_id, curso_id)
+
+@app.delete("/matriculas/", tags=["Matrículas"])
+def eliminar_matricula(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
+    return desmatricular(session, estudiante_id, curso_id)
+
+@app.get("/estudiantes/{estudiante_id}/cursos", response_model=List[Curso], tags=["Matrículas"])
+def obtener_cursos_estudiante(estudiante_id: int, session: Session = Depends(get_session)):
+    return cursos_de_estudiante(session, estudiante_id)
+
+@app.get("/cursos/{curso_id}/estudiantes", response_model=List[Estudiante], tags=["Matrículas"])
+def obtener_estudiantes_curso(curso_id: int, session: Session = Depends(get_session)):
+    return estudiantes_de_curso(session, curso_id)
