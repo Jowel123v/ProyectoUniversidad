@@ -2,11 +2,14 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlmodel import SQLModel, Session, create_engine
 
-# MODELOS
+# MODELOS y SCHEMAS (Pydantic)
 from data.models import Estudiante, Curso
+from data.schemas import (
+    EstudianteCreate, EstudianteUpdate, EstudianteRead,
+    CursoCreate, CursoUpdate, CursoRead,
+)
 
-# OPERACIONES (con soft delete, restaurar, búsquedas y filtros)
-
+# OPERACIONES
 from operations.operations_db import (
     # ESTUDIANTES
     crear_estudiante, listar_estudiantes, listar_estudiantes_eliminados, restaurar_estudiante,
@@ -21,7 +24,6 @@ from operations.operations_db import (
 )
 
 # CONFIGURACIÓN BASE DE DATOS
-
 DATABASE_URL = "sqlite:///database_universidad.db"
 engine = create_engine(DATABASE_URL, echo=False)
 
@@ -32,6 +34,7 @@ def get_session():
     with Session(engine) as session:
         yield session
 
+# FASTAPI
 app = FastAPI(
     title="Sistema de Gestión Universitaria",
     description="API para gestionar estudiantes, cursos y matrículas (N:M) en una universidad",
@@ -42,18 +45,13 @@ app = FastAPI(
 def on_startup():
     crear_db()
 
-# ROOT
-
+# ROOT / HEALTH
 @app.get("/", tags=["Root"])
 def root():
     return {
         "message": "Bienvenido al Sistema de Gestión Universitaria",
         "docs": "/docs",
-        "endpoints": [
-            "/estudiantes",
-            "/cursos",
-            "/matriculas",
-        ],
+        "endpoints": ["/estudiantes", "/cursos", "/matriculas"],
     }
 
 @app.get("/health", tags=["Root"])
@@ -62,11 +60,15 @@ def health():
 
 # ESTUDIANTES
 
-@app.post("/estudiantes/", response_model=Estudiante, tags=["Estudiantes"])
-def crear_nuevo_estudiante(obj: Estudiante, session: Session = Depends(get_session)):
-    return crear_estudiante(session, obj)
+@app.post("/estudiantes/", response_model=EstudianteRead, status_code=201, tags=["Estudiantes"])
 
-@app.get("/estudiantes/", response_model=List[Estudiante], tags=["Estudiantes"])
+@app.post("/estudiantes/", response_model=EstudianteRead, status_code=201, tags=["Estudiantes"])
+def crear_nuevo_estudiante(obj: EstudianteCreate, session: Session = Depends(get_session)):
+    est = crear_estudiante(session, obj)  # ahora retorna el objeto con id
+    return est
+
+
+@app.get("/estudiantes/", response_model=List[EstudianteRead], tags=["Estudiantes"])
 def listar_todos_los_estudiantes(
     skip: int = 0,
     limit: int = Query(10, le=100),
@@ -77,41 +79,43 @@ def listar_todos_los_estudiantes(
 ):
     return listar_estudiantes(session, skip, limit, include_deleted, semestre, nombre)
 
-@app.get("/estudiantes/deleted", response_model=List[Estudiante], tags=["Estudiantes"])
+@app.get("/estudiantes/deleted", response_model=List[EstudianteRead], tags=["Estudiantes"])
 def listar_estudiantes_borrados(session: Session = Depends(get_session)):
     return listar_estudiantes_eliminados(session)
 
 @app.post("/estudiantes/{estudiante_id}/restore", tags=["Estudiantes"])
 def restaurar_estudiante_por_id(estudiante_id: int, session: Session = Depends(get_session)):
     if restaurar_estudiante(session, estudiante_id):
-        return {"message": "Estudiante restaurado correctamente"}
-    raise HTTPException(status_code=404, detail="No fue posible restaurar el estudiante")
+        return {"message": "Estudiante restaurado correctamente (200)"}
+    raise HTTPException(status_code=404, detail="Estudiante no encontrado para restaurar")
 
-@app.get("/estudiantes/search/", response_model=List[Estudiante], tags=["Estudiantes"])
+@app.get("/estudiantes/search/", response_model=List[EstudianteRead], tags=["Estudiantes"])
 def buscar_estudiante(nombre: str = Query(..., min_length=1), session: Session = Depends(get_session)):
     return buscar_estudiante_por_nombre(session, nombre)
 
-@app.get("/estudiantes/{estudiante_id}", response_model=Estudiante, tags=["Estudiantes"])
+@app.get("/estudiantes/{estudiante_id}", response_model=EstudianteRead, tags=["Estudiantes"])
 def obtener_estudiante_por_id(estudiante_id: int, session: Session = Depends(get_session)):
     return obtener_estudiante(session, estudiante_id)
 
-@app.put("/estudiantes/{estudiante_id}", response_model=Estudiante, tags=["Estudiantes"])
-def actualizar_datos_estudiante(estudiante_id: int, obj: Estudiante, session: Session = Depends(get_session)):
+@app.patch("/estudiantes/{estudiante_id}", response_model=EstudianteRead, tags=["Estudiantes"])
+def actualizar_datos_estudiante(estudiante_id: int, obj: EstudianteUpdate, session: Session = Depends(get_session)):
     return actualizar_estudiante(session, estudiante_id, obj)
 
 @app.delete("/estudiantes/{estudiante_id}", tags=["Estudiantes"])
 def eliminar_estudiante_por_id(estudiante_id: int, session: Session = Depends(get_session)):
     if eliminar_estudiante(session, estudiante_id):
-        return {"message": "Estudiante eliminado correctamente"}
+        return {"message": "Estudiante eliminado (Historial)"}
     raise HTTPException(status_code=404, detail="Estudiante no encontrado")
 
 # CURSOS
 
-@app.post("/cursos/", response_model=Curso, tags=["Cursos"])
-def crear_nuevo_curso(obj: Curso, session: Session = Depends(get_session)):
-    return crear_curso(session, obj)
+@app.post("/cursos/", response_model=CursoRead, status_code=201, tags=["Cursos"])
+def crear_nuevo_curso(obj: CursoCreate, session: Session = Depends(get_session)):
+    crear_curso(session, obj)
+    cursos = buscar_curso_por_nombre(session, obj.nombre)
+    return cursos[-1] if cursos else {"message": "Curso creado (201)"}
 
-@app.get("/cursos/", response_model=List[Curso], tags=["Cursos"])
+@app.get("/cursos/", response_model=List[CursoRead], tags=["Cursos"])
 def listar_todos_los_cursos(
     skip: int = 0,
     limit: int = Query(10, le=100),
@@ -123,37 +127,37 @@ def listar_todos_los_cursos(
 ):
     return listar_cursos(session, skip, limit, include_deleted, creditos, codigo, nombre)
 
-@app.get("/cursos/deleted", response_model=List[Curso], tags=["Cursos"])
+@app.get("/cursos/deleted", response_model=List[CursoRead], tags=["Cursos"])
 def listar_cursos_borrados(session: Session = Depends(get_session)):
     return listar_cursos_eliminados(session)
 
 @app.post("/cursos/{curso_id}/restore", tags=["Cursos"])
 def restaurar_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
     if restaurar_curso(session, curso_id):
-        return {"message": "Curso restaurado correctamente"}
-    raise HTTPException(status_code=404, detail="No fue posible restaurar el curso")
+        return {"message": "Curso restaurado correctamente (200)"}
+    raise HTTPException(status_code=404, detail="Curso no encontrado para restaurar")
 
-@app.get("/cursos/search/", response_model=List[Curso], tags=["Cursos"])
+@app.get("/cursos/search/", response_model=List[CursoRead], tags=["Cursos"])
 def buscar_curso(nombre: str = Query(..., min_length=1), session: Session = Depends(get_session)):
     return buscar_curso_por_nombre(session, nombre)
 
-@app.get("/cursos/{curso_id}", response_model=Curso, tags=["Cursos"])
+@app.get("/cursos/{curso_id}", response_model=CursoRead, tags=["Cursos"])
 def obtener_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
     return obtener_curso(session, curso_id)
 
-@app.put("/cursos/{curso_id}", response_model=Curso, tags=["Cursos"])
-def actualizar_datos_curso(curso_id: int, obj: Curso, session: Session = Depends(get_session)):
+@app.patch("/cursos/{curso_id}", response_model=CursoRead, tags=["Cursos"])
+def actualizar_datos_curso(curso_id: int, obj: CursoUpdate, session: Session = Depends(get_session)):
     return actualizar_curso(session, curso_id, obj)
 
 @app.delete("/cursos/{curso_id}", tags=["Cursos"])
 def eliminar_curso_por_id(curso_id: int, session: Session = Depends(get_session)):
     if eliminar_curso(session, curso_id):
-        return {"message": "Curso eliminado correctamente"}
+        return {"message": "Curso eliminado lógicamente (200)"}
     raise HTTPException(status_code=404, detail="Curso no encontrado")
 
 # MATRÍCULAS (N:M)
 
-@app.post("/matriculas/", tags=["Matrículas"])
+@app.post("/matriculas/", tags=["Matrículas"], status_code=201)
 def crear_matricula(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
     return matricular(session, estudiante_id, curso_id)
 
@@ -161,10 +165,10 @@ def crear_matricula(estudiante_id: int, curso_id: int, session: Session = Depend
 def eliminar_matricula(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
     return desmatricular(session, estudiante_id, curso_id)
 
-@app.get("/estudiantes/{estudiante_id}/cursos", response_model=List[Curso], tags=["Matrículas"])
+@app.get("/estudiantes/{estudiante_id}/cursos", response_model=List[CursoRead], tags=["Matrículas"])
 def obtener_cursos_estudiante(estudiante_id: int, session: Session = Depends(get_session)):
     return cursos_de_estudiante(session, estudiante_id)
 
-@app.get("/cursos/{curso_id}/estudiantes", response_model=List[Estudiante], tags=["Matrículas"])
+@app.get("/cursos/{curso_id}/estudiantes", response_model=List[EstudianteRead], tags=["Matrículas"])
 def obtener_estudiantes_curso(curso_id: int, session: Session = Depends(get_session)):
     return estudiantes_de_curso(session, curso_id)
