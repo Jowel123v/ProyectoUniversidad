@@ -92,6 +92,7 @@ def actualizar_estudiante(session: Session, estudiante_id: int, obj_update) -> E
         data.pop("id", None)
         data.pop("is_deleted", None)
 
+        # Si cambian cédula, validar unicidad a nivel DB (IntegrityError capturado abajo)
         for k, v in data.items():
             setattr(obj, k, v)
         session.add(obj)
